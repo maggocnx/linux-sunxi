@@ -65,7 +65,6 @@ struct gronic_keypad_data {
 };
 
 void init_gpio(void){
-	int irq_err = 0;
 	//led on 
 	config_pin_mode(PIO_G,9,PIN_MODE_OUTPUT);
 	set_pin_value(PIO_G,9,1);
@@ -81,6 +80,10 @@ void init_gpio(void){
 	config_pin_pull(PIO_B, KEYPAD_IRQ_PIN, PULL_MODE_UP);
 
 
+	config_pin_pull(PIO_E, 3, PULL_MODE_UP);
+
+
+
 	config_pin_mode(PIO_E, 10, PIN_MODE_INPUT);
 	config_pin_pull(PIO_E, 10, PULL_MODE_DOWN);
 
@@ -89,11 +92,8 @@ void init_gpio(void){
 	config_pin_mode(PIO_E, SPI_SEL_1, PIN_MODE_OUTPUT);
 	config_pin_mode(PIO_B, PER_RST, PIN_MODE_OUTPUT);
 
-	set_pin_value(PIO_B,PER_RST,1);
 
-	irq_err = request_irq(KEYPAD_IRQ_NO, key_pad_irq_handler, IRQF_NO_SUSPEND, "gronic_keypad", key_data);
 
-	printk("Gronic IRQ Req : %d\n", irq_err);
 
 }
 
@@ -104,13 +104,15 @@ const ADR_REG KEYB_MCP[]={
    {0,0},
    { GPIO_A | MCP_IOCON, IOCON_BANK | IOCON_ODR }, // control     Bank, ODR
    { GPIO_B | MCP_IOCON, IOCON_BANK | IOCON_ODR }, // control     Bank, ODR
-   { GPIO_A | MCP_IODIR, 0x00 }, // GPIO-A Direction     output 4 bit Row
-   { GPIO_B | MCP_IODIR, 0x1F }, // GPIO-B Direction     input 5 bit Column
+   { GPIO_A | MCP_IODIR, 0xF0 }, // GPIO-A Direction     output 4 bit Row
+   { GPIO_B | MCP_IODIR, 0x1F}, // GPIO-B Direction     input 5 bit Column
    { GPIO_A | MCP_GPPU, 0x00 }, // GPIO-A Pull Up Res 
    { GPIO_B | MCP_GPPU, 0x1F }, // GPIO-B Pull Up Res    Res Column on
    { GPIO_A | MCP_GPINTEN, 0x00 }, // GPIO-A Interrupt on changed
    { GPIO_B | MCP_GPINTEN, 0x1F }, // GPIO-B Interrupt on changed  Interr. Column on
-   { GPIO_A | MCP_OLAT, 0x00 }, // GPIO-A default output level 
+   { GPIO_A | MCP_OLAT, 0x55}, // GPIO-A default output level 
+   { GPIO_A | MCP_IPOL, 0x00 }, 
+   { GPIO_B | MCP_IPOL, 0x00 }, 
    {0xFF,0}
 };
 
@@ -125,10 +127,11 @@ const ADR_REG CONTR_MCP[]={
    { GPIO_B | MCP_GPPU, 0xFF }, // GPIO-B Pull Up Res    Res DB on
    { GPIO_A | MCP_GPINTEN, 0x00 }, // GPIO-A Interrupt on changed
    { GPIO_B | MCP_GPINTEN, 0x00 }, // GPIO-B Interrupt on changed   
-   { GPIO_A | MCP_OLAT, 0x60 }, // GPIO-A default output level 
+   { GPIO_A | MCP_OLAT, 0x61 }, // GPIO-A default output level 
    { GPIO_B | MCP_OLAT, 0xFF }, // GPIO-B default output level
-   {0xFF,0
-   }
+    { GPIO_A | MCP_IPOL, 0x00 },
+   { GPIO_B | MCP_IPOL, 0x00 },
+   {0xFF,0   }
 };
 
 // void spi_mcp23_config( void){
@@ -171,104 +174,94 @@ static void spi_cs_set( u8 select){
 	
 }
 
-u32 SPI_A13_SET(__u32 sdata){
-	u32 smask = (0x00000080);
-	u32 rdat  = (0x00000000);
+u32 SPI_MCP(__u8 mcp_chip, __u32 sdata){
 
-										// CS low
+	 u32 smask = (1<<23);
+	 u32 rdat  = (0x00000000);
 
-	do{
-		if((sdata & smask) == 0)		e_port = e_port & ~BB_SPI2_MOSI;
-		else					e_port = e_port | BB_SPI2_MOSI;
-		*PIO_REG_DATA( PIO_E) =  e_port;										// MOSI bit out
-		*PIO_REG_DATA( PIO_E) = e_port | BB_SPI2_CLK;						// clk high
+	 e_port = (PIO_REG_DATA_VALUE(PIO_E) & 0x000000F0) | (mcp_chip << 8)  ; // select MCP-Chip  CS low
+	 *PIO_REG_DATA(PIO_E) = e_port;
+	 // *PIO_REG_DATA(PIO_E) = e_port;
+
+	  do{
+		if((sdata & smask) == 0)e_port = e_port & ~BB_SPI2_MOSI;   // clk low
+		else     e_port = e_port |  BB_SPI2_MOSI;
+		*PIO_REG_DATA( PIO_E) = e_port;          // MOSI bit out
+		*PIO_REG_DATA( PIO_E) = e_port | BB_SPI2_CLK;      // clk high
 		if(PIO_REG_DATA_VALUE(PIO_E) & BB_SPI2_MISO) rdat = rdat | smask;
 		smask = smask >> 1;
-		*PIO_REG_DATA( PIO_E) = e_port;										// clk low
-	}while(smask);
-	
-										// CS high
-	return(rdat);
+		 // *PIO_REG_DATA( PIO_E) = e_port;          
+	 }while(smask);
+	 
+	 e_port = e_port | BB_SPI2_CS0;  
+	 *PIO_REG_DATA( PIO_E) = e_port;           // CS high
+	 return(rdat);
 }
 
 
-void MCPSPI_wr(u8 mcp, u8 mreg, u8 mvalu){								// MCP Register schreiben
-
-
-	e_port = (PIO_REG_DATA_VALUE(PIO_E) & 0x000000F0) | BB_SPI2_CS0 | (mcp << 8) ;				// select ext. CS 
-	*PIO_REG_DATA(PIO_E) = e_port;
-
-	e_port = e_port & ~ BB_SPI2_CS0;
-	*PIO_REG_DATA(PIO_E) =  e_port;		
-	
-	SPI_A13_SET(0x40);										// MCP Adr.
-	SPI_A13_SET(mreg);										// MCP Reg 
-	SPI_A13_SET(mvalu);										// Value
-
-	e_port = e_port & ~BB_SPI2_MOSI;									// MOSI low
-	e_port = e_port | BB_SPI2_CS0;
-	*PIO_REG_DATA( PIO_E) = e_port;		
-}
-
-u32 MCPSPI_rd(u8 mcp, u8 mreg){											// MCP Register lesen
-	__u32 ret;
-	e_port = (PIO_REG_DATA_VALUE(PIO_E) & 0x000000F0) | BB_SPI2_CS0 | (mcp<<8);				// select ext. CS
-	*PIO_REG_DATA(PIO_E) = e_port;
-
-	e_port = e_port & ~ BB_SPI2_CS0;
-	*PIO_REG_DATA(PIO_E) =  e_port;	
-
-	SPI_A13_SET(0x41);										// MCP Adr.
-	SPI_A13_SET(mreg);										// MCP Reg
-	ret=SPI_A13_SET(0);		
-
-	e_port = e_port & ~BB_SPI2_MOSI;									// MOSI low
-	e_port = e_port | BB_SPI2_CS0;
-	*PIO_REG_DATA( PIO_E) = e_port;
-									// Value
-	return(ret);
-}
-
-void mcp23_init( const ADR_REG *chip){
+void mcp23_init( const ADR_REG *chip ){
 	u8 addr = chip->mcpreg;
-	// spi_mcp23_config();
 	chip++;
 	while(chip->mcpreg != 0xFF){
-		MCPSPI_wr(addr,chip->mcpreg,chip->mcpvalu);
+		SPI_MCP(addr, MCP_WRITE | (chip->mcpreg<<8) | chip->mcpvalu);
 		chip++;
 	}
 }
 
+
 void thread_function(void *data){
-	int cnt = 0;
+	char cnt = 0;
+	__u32 reg_val;
 	printk("Thread start");
+
+
+	set_pin_value(PIO_G,9,1);
+
+
 	while(!kthread_should_stop()){
 		
-		input_report_key(keypad_dev, BTN_0,'a');
-		input_sync(keypad_dev);
+		// input_report_key(keypad_dev, BTN_0,'a');
+		// input_sync(keypad_dev);
 
 
-		MCPSPI_wr(3,GPIO_A | MCP_OLAT,0x40);
-		// set_pin_value(PIO_G,9,cnt & 0x01);
+		// SPI_MCP(0, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (cnt & 0xFF));
+		// SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (cnt & 0xFF));
+
+		// SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | 0xC0);
+		// SPI_MCP(0, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | 0xFF);
+
+
+		reg_val = SPI_MCP(0, MCP_READ | (( GPIO_B | MCP_GPIO) << 8) | 0);
+
+		// printk("%X\n",reg_val);
+
+      		// set_pin_value(PIO_G,9,cnt & 0x01);
 
 		// config_pin_pull(PIO_B, KEYPAD_IRQ_PIN, cnt & 0x01);
 
 
 		cnt++;
-		msleep(10);
-		MCPSPI_wr(3,GPIO_A | MCP_OLAT,0x01);
-		msleep(10);
+		// msleep(5);
+		// SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | 0x00);
+
+		msleep(5);
 	}
 
-	set_pin_value(PIO_B,PER_RST,0);
+	//LED off 
 	set_pin_value(PIO_G,9,0);
-
- 	input_unregister_device(keypad_dev);
+	// free_irq(KEYPAD_IRQ_NO,key_data);
+ 	// input_unregister_device(keypad_dev);
 
 }
 
 
 void init_keypad(void){
+	int irq_err = 0;
+
+	irq_err = request_irq(KEYPAD_IRQ_NO, key_pad_irq_handler, IRQF_NO_SUSPEND, "gronic_keypad", key_data);
+	printk("Gronic IRQ Req : %d\n", irq_err);
+
+
 	int error ;
 	keypad_dev = input_allocate_device();
 	if (!keypad_dev) {
@@ -287,17 +280,62 @@ void init_keypad(void){
 
 static int __init gronic_init(void) {
 	int data = 20;
-
+	__u32 reg_val;
 	pr_info("Gronic system driver init\n");
 	
 	init_gpio();
-	init_keypad();
+	// init_keypad();
 
 	// reg_val = get_pin_value(PIO_E, 10);
 	// pr_info("Gronic  %X - \n" , reg_val);
 
+	set_pin_value(PIO_B,PER_RST,1);
+	set_pin_value(PIO_B,PER_RST,0);
+	set_pin_value(PIO_B,PER_RST,1);
+
+
 	mcp23_init( KEYB_MCP );						// Tastatur initialisieren
 	mcp23_init( CONTR_MCP );					// Drucker initialisieren
+
+	reg_val = SPI_MCP(0, MCP_READ | (( GPIO_A | MCP_IODIR) << 8) );
+	pr_info("MCP_IODIR %X\n" ,reg_val);
+
+	reg_val = SPI_MCP(0, MCP_READ | (( GPIO_A | MCP_IPOL) << 8) );
+	pr_info("MCP_IPOL %X\n" ,reg_val);
+
+	reg_val = SPI_MCP(0, MCP_READ | (( GPIO_A | MCP_GPINTEN) << 8) );
+	pr_info("MCP_GPINTEN %X\n" ,reg_val);
+
+	reg_val = SPI_MCP(0, MCP_READ | (( GPIO_A | MCP_DEFVAL) << 8) );
+	pr_info("MCP_DEFVAL %X\n" ,reg_val);
+
+	reg_val = SPI_MCP(0, MCP_READ | (( GPIO_A | MCP_INTCON) << 8) );
+	pr_info("MCP_INTCON %X\n" ,reg_val);
+
+	reg_val = SPI_MCP(0, MCP_READ | (( GPIO_A | IOCON_BANK) << 8) );
+	pr_info("IOCON_BANK %X\n" ,reg_val);
+
+	reg_val = SPI_MCP(0, MCP_READ | (( GPIO_A | MCP_GPPU) << 8) );
+	pr_info("MCP_GPPU %X\n" ,reg_val);
+
+	reg_val = SPI_MCP(0, MCP_READ | (( GPIO_A | MCP_INTF) << 8) );
+	pr_info("MCP_INTF %X\n" ,reg_val);
+
+	reg_val = SPI_MCP(0, MCP_READ | (( GPIO_A | MCP_INTCAP) << 8) );
+	pr_info("MCP_INTCAP %X\n" ,reg_val);
+
+	reg_val = SPI_MCP(0, MCP_READ | (( GPIO_A | MCP_GPIO) << 8) );
+	pr_info("MCP_GPIO %X\n" ,reg_val);
+
+	
+	reg_val = SPI_MCP(0, MCP_READ | (( GPIO_A | MCP_OLAT) << 8) );
+	pr_info("MCP_OLAT %X\n" ,reg_val);
+
+	
+	reg_val = SPI_MCP(3, MCP_READ | (( GPIO_A | MCP_OLAT) << 8) );
+	pr_info("MCP_OLAT %X\n" ,reg_val);
+
+
 
 	task = kthread_run(&thread_function,(void *)data,"gronic-system");
 
@@ -306,7 +344,6 @@ static int __init gronic_init(void) {
 
 
 static void __exit gronic_exit(void) {
-	free_irq(KEYPAD_IRQ_NO,key_data);
 	kthread_stop(task);
 
 	pr_info("Gronic system driver exit \n");

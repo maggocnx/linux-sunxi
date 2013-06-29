@@ -89,7 +89,8 @@
 #define SPISEL0				(0x00000100)
 #define SPISEL1				(0x00000101)
 
-
+#define MCP_WRITE 0x00400000
+#define MCP_READ 0x00410000
 
 typedef struct {
 	u8	mcpreg;
