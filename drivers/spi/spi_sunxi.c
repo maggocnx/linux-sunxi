@@ -138,7 +138,7 @@ s32 aw_spi_set_cs(u32 chipselect, void *base_addr)
 
         writel(reg_val, base_addr + SPI_CTL_REG);
 
-        //spi_msg("Chip Select set succeed! cs = %d\n", chipselect);
+        spi_msg("Chip Select set succeed! cs = %d 0x%X \n", chipselect,base_addr);
         return AW_SPI_OK;
     }
     else
@@ -281,7 +281,7 @@ void aw_spi_set_clk(u32 spi_clk, u32 ahb_clk, void *base_addr)
     u32 N = 0;
     u32 div_clk = (ahb_clk>>1)/spi_clk;
 
-    //spi_msg("set spi clock %d, mclk %d\n", spi_clk, ahb_clk);
+    spi_msg("set spi clock %d, mclk %d baseaddre 0x%X \n", spi_clk, ahb_clk,base_addr);
     reg_val = readl(base_addr + SPI_CLK_RATE_REG);
 
     /* CDR2 */
@@ -1478,7 +1478,7 @@ static int __init spi_sunxi_probe(struct platform_device *pdev)
 		goto err6;
 	}
 
-	spi_msg("allwinners SoC SPI Driver loaded for Bus SPI-%d with %d Slaves attached\n", pdev->id, master->num_chipselect);
+	spi_msg("allwinners SoC SPI Driver loaded for Bus SPI-%d with %d Slaves attached Base addresss %X \n", pdev->id, master->num_chipselect,aw_spi->base_addr);
 	//spi_msg("\tIOmem=[0x%x-0x%x]\tDMA=[%d]\n", mem_res->end, mem_res->start, aw_spi->dma_id);
 	spi_msg("[spi-%d]: driver probe succeed, base %p, irq %d, dma_id %d!\n", master->bus_num, aw_spi->base_addr, aw_spi->irq, aw_spi->dma_id);
 	return 0;

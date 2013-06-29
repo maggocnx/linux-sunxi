@@ -20,6 +20,12 @@ menuconfig MISC_DEVICES
 
 if MISC_DEVICES
 
+config GRONIC_SYSTEM	
+	tristate "GRONIC Drivers for Cashier"
+	depends on ARCH_SUN5I
+	help
+		Composite driver for keypad, myfair and customer lcd
+
 config AD525X_DPOT
 	tristate "Analog Devices Digital Potentiometers"
 	depends on (I2C || SPI) && SYSFS

@@ -664,6 +664,7 @@ static struct spi_driver spidev_spi_driver = {
 static int __init spidev_init(void)
 {
 	int status;
+	printk("SPIDEV init");
 
 	/* Claim our 256 reserved device numbers.  Then register a class
 	 * that will key udev/mdev to add/remove /dev nodes.  Last, register

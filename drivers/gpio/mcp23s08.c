@@ -390,6 +390,8 @@ static int mcp23s08_probe(struct spi_device *spi)
 
 	type = spi_get_device_id(spi)->driver_data;
 
+	printk("MCP23 probe");
+
 	pdata = spi->dev.platform_data;
 	if (!pdata || !gpio_is_valid(pdata->base)) {
 		dev_dbg(&spi->dev, "invalid or missing platform data\n");
@@ -442,6 +444,7 @@ static int mcp23s08_probe(struct spi_device *spi)
 		if (status < 0)
 			dev_dbg(&spi->dev, "setup --> %d\n", status);
 	}
+	printk("MCP23 passed");
 
 	return 0;
 
@@ -514,6 +517,7 @@ static struct spi_driver mcp23s08_driver = {
 
 static int __init mcp23s08_init(void)
 {
+	printk("MCP23 Init Gronic");
 	return spi_register_driver(&mcp23s08_driver);
 }
 /* register after spi postcore initcall and before
