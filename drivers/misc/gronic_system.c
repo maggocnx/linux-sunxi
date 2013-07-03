@@ -15,7 +15,12 @@
 struct gronic_keypad_data *key_data = NULL;
 __u32 e_port;
 
+char*  lcd_buf;
+
+
+
 static struct input_dev *keypad_dev;
+static void __exit gronic_exit(void);
 
 void config_pin_mode(__u32  port, __u32  pin, __u32 mode){
 	__u32 reg_val = 0;
@@ -203,21 +208,169 @@ void mcp23_init( const ADR_REG *chip ){
 }
 
 
+
+u8 cont_reg_a = 0x60 ;		// CS= high BLT= on
+
+void disp_data(__u8 lcd_dat){
+ 	cont_reg_a |= 0x80;         // A0= high 
+	SPI_MCP(3, MCP_WRITE | (( GPIO_B | MCP_OLAT) << 8) | lcd_dat);
+	SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (cont_reg_a & ~0x20) );  // CS= low
+	SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (cont_reg_a | 0x20) );  // CS= high
+}
+
+void disp_cmd(__u8 lcd_cmd){
+	cont_reg_a &= ~0x80;         // A0= low 
+	SPI_MCP(3, MCP_WRITE | (( GPIO_B | MCP_OLAT) << 8) | lcd_cmd);
+	SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (cont_reg_a & ~0x20) );  // CS= low
+	SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (cont_reg_a | 0x20) );  // CS= high
+}
+
+__u8 LCD_image(char * image){
+__u8 page,i,j,v,mask_v,mask_h;
+__u8 im_buf[128];
+ 
+                for(page=0; page<8; page++){
+                               memset(im_buf,0,128);
+                               mask_v=0x01;
+                               for(v=0;v<8;v++){
+                                               for(j=0;j<16;j++){                                                                                                          // von horizontal pixel nach vertikal pixel wandeln
+                                                               mask_h=0x80;
+                                                               for(i=0;i<8;i++){
+                                                               	      if(*image & mask_h) im_buf[(j*8)+i] |= mask_v;
+                                                                              mask_h=mask_h>>1;
+                                                   }
+                                                               image++;
+                                               }
+                                               mask_v = mask_v<<1;
+                               }
+ 
+                               disp_cmd(START_LINE_SET);
+                               disp_cmd(PAGE_ADDRESS_SET + page);
+                               disp_cmd(COLUMN_ADDRESS_HIGH);
+                               disp_cmd(COLUMN_ADDRESS_LOW);
+                               for(i=0;i<NUMBER_OF_COLUMNS;i++){                                                // 0..127
+                               disp_data(im_buf[i]);
+                               }
+                }
+                return(0);
+}
+
+	
+	
+/******************************************************************************
+This performs all of the necessary initialization of the SED-1565 controller
+Init_Display();
+******************************************************************************/
+u8 LCD_vol=8;
+#define  LCDVOL_MAX 25
+
+
+int display_open(struct inode *inode, struct file *filp) {
+
+  /* Success */
+ 	return 0;
+}
+
+int display_release(struct inode *inode, struct file *filp) {
+ 
+  /* Success */
+ 	return 0;
+}
+
+
+ssize_t display_write( struct file *filp, char *buf, size_t count, loff_t *f_pos) {
+	char *tmp;
+	tmp=buf+count-1;
+
+	if(count>BUF_SIZE) count = BUF_SIZE;
+	copy_from_user(lcd_buf,buf,count);
+
+	LCD_image(lcd_buf);
+	return count;
+}
+
+
+
+
+struct file_operations lcd_fops = {
+	write : display_write,
+	open: display_open,
+	release: display_release
+};
+
+
+
+void register_lcd(void){
+	int result;
+
+	 result = register_chrdev(BUF_SIZE, "backlcd", &lcd_fops);
+  		if (result < 0) {
+    			printk("<1>memory: cannot obtain major number %d\n", BUF_SIZE);
+    		return result;
+  	}
+
+  	lcd_buf = kmalloc(BUF_SIZE, GFP_KERNEL); 
+  	if (!lcd_buf) { 
+    		result = -ENOMEM;
+    		goto fail; 
+  	} 
+	memset(lcd_buf,0x88,BUF_SIZE);
+
+
+  	printk("Gronic Inserting memory module Major Number : %d \n", BUF_SIZE); 
+  	return 0;
+
+  fail:
+     	gronic_exit(); 
+    	return result;
+
+}
+
+
+void Init_LCD(void){
+	disp_cmd(0);
+	disp_cmd(RESET_DISPLAY);
+	disp_cmd(LCD_BIAS_1_9);
+	disp_cmd(ADC_SELECT_NORMAL);
+	disp_cmd(COMMON_OUTPUT_REVERSE);
+	disp_cmd(V5_RESISTOR_RATIO);
+	disp_cmd(ELECTRONIC_VOLUME_SET);
+	disp_cmd(LCD_vol);
+	disp_cmd(START_LINE_SET);
+	disp_cmd((POWER_CONTROL_SET | VOLTAGE_REGULATOR |	VOLTAGE_FOLLOWER | BOOSTER_CIRCUIT));
+	disp_cmd(DISPLAY_NORMAL);
+	disp_cmd(DISPLAY_ON);
+}
+
+// void Off_Display(void){
+// 	disp_cmd(0);
+// 	disp_cmd(RESET_DISPLAY);
+// 	disp_cmd(POWER_CONTROL_SET);
+// 	disp_cmd(DISPLAY_OFF);
+// }
+
+
+
 void thread_function(void *data){
 	char cnt = 0;
-	char key;
+	__u32  key,last_key;
 
 	__u32 reg_val;
 	__u8 col_reg, row_reg;
-	printk("Thread start\n");
 
+	bool flg;
+
+	printk("Gronic thread start\n");
 
 	set_pin_value(PIO_G,9,1);
 
 
 	while(!kthread_should_stop()){
+
 		reg_val = PIO_REG_DATA_VALUE(PIO_B) ;
-		// printk("XX %X\n",reg_val);
+		
+		input_report_key(keypad_dev, 0,1);
+
 		if((reg_val & (1<<KEYPAD_IRQ_PIN)) ==0) {
 
 			col_reg = SPI_MCP(0, MCP_READ | (( GPIO_B | MCP_INTCAP) << 8) | 0) & 0x1F;
@@ -234,123 +387,137 @@ void thread_function(void *data){
 
 			SPI_MCP(0, MCP_READ | (( GPIO_B | MCP_INTCAP) << 8) | 0) & 0x1F;
 
-
-
 			switch((__u32)(col_reg<<4)|row_reg){
-				case 0x0FE : key = '+' ;break;
-				case 0x0FD : key = 'M' ;break;
-				case 0x0FB : key = '-' ;break;
-				case 0x17E : key = '1' ;break;
-				case 0x17D : key = '2' ;break;
-				case 0x17B : key = '3' ;break;
-				case 0x1BE : key = '4' ;break;
-				case 0x1BD : key = '5' ;break;
-				case 0x1BB : key = '6' ;break;
-				case 0x1DE : key = '7' ;break;
-				case 0x1DD : key = '8' ;break;
-				case 0x1DB : key = '9' ;break;
-				case 0x1ED : key = '0' ;break;
-				case 0x1EE : key = '.' ;break;
-				case 0x1EB : key = '?' ;break;
-				case 0x177 : key = 'A' ;break;
-				case 0x1B7: key = 'K' ;break;
-				case 0x1D7: key = 'O' ;break;
-				// case 0x1FF: key = 'R' ;break;
+				case 0x0FE : key = KEY_UP ;break;
+				case 0x0FD : key = KEY_F2 ;break;
+				case 0x0FB : key = KEY_DOWN ;break;
+				case 0x17E : key = KEY_1 ;break;
+				case 0x17D : key = KEY_2 ;break;
+				case 0x17B : key = KEY_3 ;break;
+				case 0x1BE : key = KEY_4 ;break;
+				case 0x1BD : key = KEY_5 ;break;
+				case 0x1BB : key = KEY_6 ;break;
+				case 0x1DE : key = KEY_7 ;break;
+				case 0x1DD : key = KEY_8 ;break;
+				case 0x1DB : key = KEY_9 ;break;
+				case 0x1ED : key = KEY_0 ;break;
+				case 0x1EE : key = KEY_DOT ;break;
+				case 0x1EB : key = KEY_QUESTION;break;
+				case 0x177 : key = KEY_A;break;
+				case 0x1B7 :  key  = KEY_BACKSPACE ;break;
+				case 0x1D7 :  key  = KEY_ENTER;break;
+				// case 0x1FF :   key   = 0 ;break;
 				default : key = 0; break;
 			}
+			
 
-			if(key) printk("Key %c \n",key);
 
+			if(key){
+			LCD_image(lcd_buf);
 
+				last_key = key;
+				input_report_key(keypad_dev, key,true);
+
+			}
+			else{
+				if(last_key)
+					input_report_key(keypad_dev,last_key,false);
+			}
+			input_sync(keypad_dev);
 			cnt++;
 		}
-
-
-		// SPI_MCP(0, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (cnt & 0xFF));
-		if(cnt & 1 )
-			SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | 0x40);
-		else 
-			SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | 0x00);
-
-		// SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | 0x40);
-		// SPI_MCP(0, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | 0xFF);
-
-
-		// reg_val = SPI_MCP(0, MCP_READ | (( GPIO_B | MCP_GPIO) << 8) | 0);
-
-		// printk("%X\n",reg_val);
-
-      		// set_pin_value(PIO_G,9,cnt & 0x01);
-
-		// config_pin_pull(PIO_B, KEYPAD_IRQ_PIN, cnt & 0x01);
-
-
-		// msleep(25);
-		// SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | 0x00);
-
-		msleep(50);
+		msleep(20);
 	}
-
-	//LED off 
 	set_pin_value(PIO_G,9,0);
-
-	free_irq(KEYPAD_IRQ_NO,key_data);
- 	input_unregister_device(keypad_dev);
-
 }
 
 
-static irqreturn_t key_pad_irq_handler(int irq, void *devid)
-{
-	__u32 reg_val;
-	printk("Gronic IRQ Handler \n");	
-	set_pin_value(PIO_B,PER_RST,0);
 
-	reg_val = SPI_MCP(0, MCP_READ | (( GPIO_B | MCP_INTCAP) << 8) | 0) & 0x1F;
-	printk("Key %X\n",reg_val);
 
-		// input_report_key(keypad_dev, BTN_0,'a');
-		// input_sync(keypad_dev);
+// static irqreturn_t key_pad_irq_handler(int irq, void *devid)
+// {
+// 	__u32 reg_val;
+// 	printk("Gronic IRQ Handler \n");	
+// 	set_pin_value(PIO_B,PER_RST,0);
 
-	return IRQ_HANDLED;
-}
+// 	reg_val = SPI_MCP(0, MCP_READ | (( GPIO_B | MCP_INTCAP) << 8) | 0) & 0x1F;
+// 	printk("Key %X\n",reg_val);
+
+// 	// input_report_key(keypad_dev, BTN_0,'a');
+// 	// 	input_sync(keypad_dev);
+
+// 	return IRQ_HANDLED;
+// }
 
 
 void init_keypad(void){
-	int irq_err = 0;
+	int error;
 
-	irq_err = request_irq(KEYPAD_IRQ_NO, key_pad_irq_handler, IRQF_NO_SUSPEND, "gronic_keypad", key_data);
-	printk("Gronic IRQ Req : %d\n", irq_err);
+	// if (request_irq(KEYPAD_IRQ_NO, key_pad_irq_handler, 0, "gronic_keypad", NULL)) {
+ //                printk(KERN_ERR "Gronic Can't allocate irq %d\n", KEYPAD_IRQ_NO);
+ //                return -EBUSY;
+ //        	}
+ //        	else{
+	// 	printk("Gronic IRQ Req ");
+ //        	}
 
 
-	int error ;
+
 	keypad_dev = input_allocate_device();
 	if (!keypad_dev) {
-		printk(KERN_ERR "button.c: Not enough memory\n");
+		printk(KERN_ERR "Gronic : Not enough memory\n");
+		error = -ENOMEM;
+		goto err_free_irq;
 	}
 
+	keypad_dev->name = "Gronic Keypad";
 	keypad_dev->evbit[0] = BIT_MASK(EV_KEY);
-	keypad_dev->keybit[BIT_WORD(BTN_0)] = BIT_MASK(BTN_0);
+		
+	keypad_dev->keybit[BIT_WORD(KEY_1 )]= BIT_MASK(KEY_1 )  |  BIT_MASK(KEY_2 ) | BIT_MASK(KEY_3 )| BIT_MASK(KEY_4 )| BIT_MASK(KEY_5 )| BIT_MASK(KEY_6 )| 
+			        BIT_MASK(KEY_7 )| BIT_MASK(KEY_8 )| BIT_MASK(KEY_9 )| BIT_MASK(KEY_0)| BIT_MASK(KEY_BACKSPACE ); 
+	keypad_dev->keybit[BIT_WORD(KEY_DOT )] |= BIT_MASK(KEY_DOT );
+	keypad_dev->keybit[BIT_WORD(KEY_QUESTION)]|= BIT_MASK(KEY_QUESTION);
+	keypad_dev->keybit[BIT_WORD(KEY_A )]|= BIT_MASK(KEY_A );
+	keypad_dev->keybit[BIT_WORD(KEY_BACKSPACE)]|= BIT_MASK(KEY_BACKSPACE );
+	keypad_dev->keybit[BIT_WORD(KEY_ENTER )]|= BIT_MASK(KEY_ENTER);
+	keypad_dev->keybit[BIT_WORD(KEY_UP )] |= BIT_MASK(KEY_UP) | BIT_MASK(KEY_DOWN) ;
+	keypad_dev->keybit[BIT_WORD(KEY_F2)]  |= BIT_MASK(KEY_F2);
+
 
 	error = input_register_device(keypad_dev);
 	if (error) {
-		printk( "button.c: Failed to register device\n");
+		printk(KERN_ERR "Gronic : Failed to register device\n");
+		goto err_free_dev;
 	}
 
+	return 0;
+
+ err_free_dev:
+	input_free_device(keypad_dev);
+ err_free_irq:
+	// free_irq(KEYPAD_IRQ_NO, key_pad_irq_handler);
+	return error;
 }
+
 
 static int __init gronic_init(void) {
 	int data = 20;
 	__u32 reg_val;
 	pr_info("Gronic system driver init\n");
-	
+
 	init_gpio();
 	init_keypad();
 
 
-
 	mcp23_init( KEYB_MCP );						// Tastatur initialisieren
 	mcp23_init( CONTR_MCP );					// Drucker initialisieren
+	
+	register_lcd();
+	Init_LCD();
+	
+
+
+	LCD_image((char*) lcd_buf);
 
 	task = kthread_run(&thread_function,(void *)data,"gronic-system");
 
@@ -359,8 +526,20 @@ static int __init gronic_init(void) {
 
 
 static void __exit gronic_exit(void) {
-	kthread_stop(task);
 
+	unregister_chrdev(BUF_SIZE, "backlight");
+
+ 	input_unregister_device(keypad_dev);
+
+
+	/* Freeing buffer memory */
+	 if (lcd_buf) {
+	     kfree(lcd_buf);
+	 }
+
+
+	kthread_stop(task);
+	// exit();
 	pr_info("Gronic system driver exit \n");
 }
 
