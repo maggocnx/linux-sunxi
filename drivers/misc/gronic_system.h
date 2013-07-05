@@ -9,14 +9,23 @@
 #define PIO_F 	6
 #define PIO_G 	7
 
+
+//PORT Eq
 #define SPI_CS0 	0
 #define SPI_SCLK 	1
 #define SPI_MOSI 	2
 #define SPI_MISO 	3
 
+#define PH_1A 4
+#define PH_1B 5
+#define PH_2A 6
+#define PH_2B 7
+
 #define SPI_SEL_0   8
 #define SPI_SEL_1   9
 #define PER_RST   15
+
+
 
 
 #define KEYPAD_IRQ_PIN   10
@@ -80,8 +89,6 @@
 
 #define GPIO_A 		0x00
 #define GPIO_B 		0x01
-
-
 
 #define BB_SPI2_CS0			(0x00000001)
 #define BB_SPI2_CLK			(0x00000002)
@@ -160,7 +167,39 @@ typedef struct {
 									data into the register, then the electronic volume mode is released. */
 #define ELECTRONIC_VOLUME_SET 	0x81
 #define ELECTRONIC_VOLUME_INIT 	8
-      
+
+#define LCD_BUF_SIZE ((NUMBER_OF_COLUMNS*NUMBER_OF_ROWS)/8)
 
 
-#define BUF_SIZE ((NUMBER_OF_COLUMNS*NUMBER_OF_ROWS)/8)
+
+#define PRINTER_START	0
+#define HEAD_LOAD_1PRT	3
+#define	HEAD_2PRT		2
+#define NEXT_STEP		1
+
+
+#define PRINTER_WDT 	0x01
+#define PRINTER_SENS	0x02
+#define PRINTER_STB2	0x04
+#define PRINTER_STB1	0x08
+#define PRINTER_VOLT	0x10
+#define PRINTER_MASK	(0x1F)
+
+#define PRINTER_LATCH	0x0200
+
+#define PRINTER_DOT		384
+
+#define PRINTER_OFF 0
+
+#define MAX_LINES 100
+
+#define PR_BUF_SIZE (PRINTER_DOT*MAX_LINES)/8								
+
+#define CLASS_NAME "gronic"
+#define DISPLAY_DEVICE_NAME "backlcd"
+#define PRINTER_DEVICE_NAME "thprint"
+
+
+
+
+static void __exit gronic_exit(void);
