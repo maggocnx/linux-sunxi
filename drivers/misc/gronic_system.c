@@ -39,13 +39,9 @@ char*  pr_buf;
 struct  task_struct  *task;
 static struct class* device_class = NULL;
 
-
-
 MODULE_AUTHOR("Gronic Systems GmbH");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("System' driver for itegrated peripherals");
-
-
 
 
 void config_pin_mode(__u32  port, __u32  pin, __u32 mode){
@@ -97,6 +93,14 @@ void init_gpio(void){
 	config_pin_mode(PIO_E, SPI_CS0, PIN_MODE_OUTPUT);
 	config_pin_mode(PIO_E, SPI_SCLK, PIN_MODE_OUTPUT);
 
+
+	//config printer
+	config_pin_mode(PIO_E, PH_1A, PIN_MODE_OUTPUT);
+	config_pin_mode(PIO_E, PH_1B, PIN_MODE_OUTPUT);
+	config_pin_mode(PIO_E, PH_2A, PIN_MODE_OUTPUT);
+	config_pin_mode(PIO_E, PH_2B, PIN_MODE_OUTPUT);
+
+
 	//Interupt key press
 	config_pin_pull(PIO_B, KEYPAD_IRQ_PIN, PULL_MODE_UP);
 	// config_pin_mode(PIO_B, KEYPAD_IRQ_PIN, PIN_MODE_INT);
@@ -104,6 +108,9 @@ void init_gpio(void){
 
 
 	config_pin_pull(PIO_E, 3, PULL_MODE_UP);
+
+
+
 
 
 
@@ -152,7 +159,7 @@ const ADR_REG CONTR_MCP[]={
    { GPIO_B | MCP_GPINTEN, 0x00 }, // GPIO-B Interrupt on changed   
    { GPIO_A | MCP_OLAT, 0x61 }, // GPIO-A default output level 
    { GPIO_B | MCP_OLAT, 0xFF }, // GPIO-B default output level
-    { GPIO_A | MCP_IPOL, 0x00 },
+	{ GPIO_A | MCP_IPOL, 0x00 },
    { GPIO_B | MCP_IPOL, 0x00 },
    {0xFF,0   }
 };
@@ -234,7 +241,7 @@ void mcp23_init( const ADR_REG *chip ){
 u8 cont_reg_a = 0x60 ;		// CS= high BLT= on
 
 void disp_data(__u8 lcd_dat){
- 	cont_reg_a |= 0x80;         // A0= high 
+	cont_reg_a |= 0x80;         // A0= high 
 	SPI_MCP(3, MCP_WRITE | (( GPIO_B | MCP_OLAT) << 8) | lcd_dat);
 	SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (cont_reg_a & ~0x20) );  // CS= low
 	SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (cont_reg_a | 0x20) );  // CS= high
@@ -251,30 +258,30 @@ __u8 LCD_image(char * image){
 __u8 page,i,j,v,mask_v,mask_h;
 __u8 im_buf[128];
  
-                for(page=0; page<8; page++){
-                               memset(im_buf,0,128);
-                               mask_v=0x01;
-                               for(v=0;v<8;v++){
-                                               for(j=0;j<16;j++){                                                                                                          // von horizontal pixel nach vertikal pixel wandeln
-                                                               mask_h=0x80;
-                                                               for(i=0;i<8;i++){
-                                                               	      if(*image & mask_h) im_buf[(j*8)+i] |= mask_v;
-                                                                              mask_h=mask_h>>1;
-                                                   }
-                                                               image++;
-                                               }
-                                               mask_v = mask_v<<1;
-                               }
+				for(page=0; page<8; page++){
+							   memset(im_buf,0,128);
+							   mask_v=0x01;
+							   for(v=0;v<8;v++){
+											   for(j=0;j<16;j++){                                                                                                          // von horizontal pixel nach vertikal pixel wandeln
+															   mask_h=0x80;
+															   for(i=0;i<8;i++){
+																	  if(*image & mask_h) im_buf[(j*8)+i] |= mask_v;
+																			  mask_h=mask_h>>1;
+												   }
+															   image++;
+											   }
+											   mask_v = mask_v<<1;
+							   }
  
-                               disp_cmd(START_LINE_SET);
-                               disp_cmd(PAGE_ADDRESS_SET + page);
-                               disp_cmd(COLUMN_ADDRESS_HIGH);
-                               disp_cmd(COLUMN_ADDRESS_LOW);
-                               for(i=0;i<NUMBER_OF_COLUMNS;i++){                                                // 0..127
-                               disp_data(im_buf[i]);
-                               }
-                }
-                return(0);
+							   disp_cmd(START_LINE_SET);
+							   disp_cmd(PAGE_ADDRESS_SET + page);
+							   disp_cmd(COLUMN_ADDRESS_HIGH);
+							   disp_cmd(COLUMN_ADDRESS_LOW);
+							   for(i=0;i<NUMBER_OF_COLUMNS;i++){                                                // 0..127
+							   disp_data(im_buf[i]);
+							   }
+				}
+				return(0);
 }
 	
 /******************************************************************************
@@ -288,13 +295,13 @@ u8 LCD_vol=8;
 int display_open(struct inode *inode, struct file *filp) {
 
   /* Success */
- 	return 0;
+	return 0;
 }
 
 int display_release(struct inode *inode, struct file *filp) {
  
   /* Success */
- 	return 0;
+	return 0;
 }
 
 
@@ -323,10 +330,10 @@ int register_lcd(void){
 	int result;
 
 	 display_major = register_chrdev(0, DISPLAY_DEVICE_NAME, &lcd_fops);
-  		if (result < 0) {
-    			printk("memory: cannot obtain major number %d\n", display_major);
-    		return result;
-  	}
+		if (result < 0) {
+				printk("memory: cannot obtain major number %d\n", display_major);
+			return result;
+	}
 
 
 	device_class = class_create(THIS_MODULE, CLASS_NAME);
@@ -344,34 +351,31 @@ int register_lcd(void){
 	}
 
 
-  	lcd_buf = kmalloc(LCD_BUF_SIZE, GFP_KERNEL); 
-  	if (!lcd_buf) { 
-    		result = -ENOMEM;
-    		goto fail; 
-  	} 
+	lcd_buf = kmalloc(LCD_BUF_SIZE, GFP_KERNEL); 
+	if (!lcd_buf) { 
+			result = -ENOMEM;
+			goto fail; 
+	} 
 	memset(lcd_buf,0,LCD_BUF_SIZE);
 
 	LCD_image((char*) lcd_buf);
 
-  	printk("Gronic registering Backlcd : %d \n", LCD_BUF_SIZE); 
-  	return 0;
+	printk("Gronic registering Backlcd : %d \n", display_major); 
+	return 0;
 
   fail:
-     	gronic_exit(); 
-    	return result;
+		gronic_exit(); 
+		return result;
 }
-
-
-
 
 int printer_open(struct inode *inode, struct file *filp) {
   /* Success */
- 	return 0;
+	return 0;
 }
 
 int printer_release(struct inode *inode, struct file *filp) {
   /* Success */
- 	return 0;
+	return 0;
 }
 
 ssize_t printer_write( struct file *filp, char *buf, size_t count, loff_t *f_pos) {
@@ -395,27 +399,29 @@ struct file_operations pr_fops = {
 int register_printer(void){
 	int result;
 
-	 result = register_chrdev(PR_BUF_SIZE, "thprint", &pr_fops);
-  		if (result < 0) {
-    			printk("<1>memory: cannot obtain major number %d\n", PR_BUF_SIZE);
-    		return result;
-  	}
+	 // result = register_chrdev(PR_BUF_SIZE, "thprint", &pr_fops);
+  // 		if (result < 0) {
+  //   			printk("<1>memory: cannot obtain major number %d\n", PR_BUF_SIZE);
+  //   		return result;
+  // 	}
 
-  	pr_buf = kmalloc(PR_BUF_SIZE, GFP_KERNEL); 
-  	if (!pr_buf) { 
-    		result = -ENOMEM;
-    		goto fail; 
-  	} 
-	memset(pr_buf,0,PR_BUF_SIZE);
+	pr_buf = kmalloc(PR_BUF_SIZE, GFP_KERNEL); 
+	if (!pr_buf) { 
 
-	LCD_image((char*) pr_buf);
+			result = -ENOMEM;
+			goto fail; 
+	} 
+	printk("PRBUF %d ", pr_buf);
+	memset(pr_buf,0x0,PR_BUF_SIZE);
 
-  	printk("Gronic registering Thermal printer : %d \n", PR_BUF_SIZE); 
-  	return 0;
+	// LCD_image((char*) pr_buf);
+
+ //  	printk("Gronic registering Thermal printer : %d \n", PR_BUF_SIZE); 
+	return 0;
 
   fail:
-     	gronic_exit(); 
-    	return result;
+		gronic_exit(); 
+		return result;
 
 }
 
@@ -431,6 +437,7 @@ void Init_LCD(void){
 	disp_cmd(LCD_vol);
 	disp_cmd(START_LINE_SET);
 	disp_cmd((POWER_CONTROL_SET | VOLTAGE_REGULATOR |	VOLTAGE_FOLLOWER | BOOSTER_CIRCUIT));
+
 	disp_cmd(DISPLAY_NORMAL);
 	disp_cmd(DISPLAY_ON);
 }
@@ -513,7 +520,7 @@ int init_keypad(void){
 	keypad_dev->evbit[0] = BIT_MASK(EV_KEY);
 		
 	keypad_dev->keybit[BIT_WORD(KEY_1 )]= BIT_MASK(KEY_1 )  |  BIT_MASK(KEY_2 ) | BIT_MASK(KEY_3 )| BIT_MASK(KEY_4 )| BIT_MASK(KEY_5 )| BIT_MASK(KEY_6 )| 
-			        BIT_MASK(KEY_7 )| BIT_MASK(KEY_8 )| BIT_MASK(KEY_9 )| BIT_MASK(KEY_0)| BIT_MASK(KEY_BACKSPACE ); 
+					BIT_MASK(KEY_7 )| BIT_MASK(KEY_8 )| BIT_MASK(KEY_9 )| BIT_MASK(KEY_0)| BIT_MASK(KEY_BACKSPACE ); 
 	keypad_dev->keybit[BIT_WORD(KEY_DOT )] |= BIT_MASK(KEY_DOT );
 	keypad_dev->keybit[BIT_WORD(KEY_QUESTION)]|= BIT_MASK(KEY_QUESTION);
 	keypad_dev->keybit[BIT_WORD(KEY_A )]|= BIT_MASK(KEY_A );
@@ -559,28 +566,38 @@ void step_out(void){	   								// stepper -1
 	 *PIO_REG_DATA(PIO_E) = (e_port & 0xF) | step;
 }
 
+char *wbuf;
 
-void head_out(char * wbuf){					   			// Thermal Head out
+void head_out(void){					   			// Thermal Head out
 __u8 hmask;
 __u8 n=PRINTER_DOT/8;
+__u8 out;
 
-	e_port = BB_SPI2_CS0;
+	e_port = PRINTER_LATCH | step | BB_SPI2_CS0;
+	// e_port = (e_port & ~BB_SPI2_CS0) | PRINTER_LATCH | step;					        // Printer Latch low 
 	 *PIO_REG_DATA(PIO_E) = e_port;
 
 	while(n--){
 		hmask = 0x80;
+		// *wbuf = 0x01;
+		out = *wbuf++;
+		out=0x80;
 		do{
-			if((*wbuf & hmask) == 0) e_port = e_port & ~BB_SPI2_MOSI;
-			else					 e_port = e_port |  BB_SPI2_MOSI;
+			if((out & hmask) == 0)
+				e_port = e_port & ~BB_SPI2_MOSI;
+			else					 
+				e_port = e_port |  BB_SPI2_MOSI;
 			*PIO_REG_DATA(PIO_E) = e_port;
-	 		*PIO_REG_DATA(PIO_E) = e_port | BB_SPI2_CLK ;
+			*PIO_REG_DATA(PIO_E) = e_port | BB_SPI2_CLK ;
 			hmask = hmask >> 1;
 		//	set_port( PORT_E, e_port);										// clk low
 		}while(hmask);
-		wbuf++;
 	}
 
+	// e_port = PRINTER_LATCH | step;
 	e_port = (e_port & ~BB_SPI2_CS0) | PRINTER_LATCH;					        // Printer Latch low
+	 *PIO_REG_DATA(PIO_E) = e_port;
+	 *PIO_REG_DATA(PIO_E) = e_port;
 	 *PIO_REG_DATA(PIO_E) = e_port;
 	e_port = e_port | BB_SPI2_CS0;											// Printer Latch high
 	 *PIO_REG_DATA(PIO_E) = e_port;
@@ -597,12 +614,16 @@ void th_printer(void){				  					// Timer
 			printer_status=PRINTER_OFF;
 			e_port &= 0x0F;		
 			 *PIO_REG_DATA(PIO_E) = e_port;
-			return;
 		}
+		return;
 	}
 
+
+	// printk("lines : %d -- step : %x -- status : %d\n", lines_to_print, step,printer_status);
+
 	switch(printer_status){
-	 	case PRINTER_START:
+
+		case PRINTER_START:
 			mcp3_A_reg = mcp3_A_reg | PRINTER_VOLT | PRINTER_WDT;
 			SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | mcp3_A_reg );	// Printer on
 			mcp3_A_reg = mcp3_A_reg & ~PRINTER_WDT;
@@ -612,8 +633,14 @@ void th_printer(void){				  					// Timer
 			printer_status=HEAD_LOAD_1PRT;
 		break;
 
+		case NEXT_STEP:
+			step_out();
+			lines_to_print--;
+			printer_status = HEAD_LOAD_1PRT;
+		// break;
+
 		case HEAD_LOAD_1PRT:
-		    head_out(pr_image);
+			head_out();
 			pr_image = pr_image + (PRINTER_DOT/8);
 
 			mcp3_A_reg = ( mcp3_A_reg | PRINTER_VOLT | PRINTER_WDT | PRINTER_STB1 ) & ~( PRINTER_STB2 ) ;
@@ -623,15 +650,12 @@ void th_printer(void){				  					// Timer
 		break;
 
 		case HEAD_2PRT:
-			mcp3_A_reg = ( mcp3_A_reg | PRINTER_VOLT  | PRINTER_STB2 ) & ~( PRINTER_STB1 | PRINTER_WDT ) ;
+			mcp3_A_reg = ( mcp3_A_reg | PRINTER_VOLT  | PRINTER_STB2 ) & ~PRINTER_STB1;
 			printer_paper=SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | mcp3_A_reg );	// Printer Sensor
 			printer_status--;
 		break;
 
-		case NEXT_STEP:
-			step_in();
-			lines_to_print--;
-		break;
+		
 
 		default:
 			printer_status--;
@@ -646,15 +670,20 @@ void thread_function(void *data){
 	printk("Gronic system  thread start\n");
 	set_pin_value(PIO_G,9,1); //Led on
 
+	wbuf = pr_buf;
+
 	while(!kthread_should_stop()){
 
-		reg_val = PIO_REG_DATA_VALUE(PIO_B) ;
-		
-		if((reg_val & (1<<KEYPAD_IRQ_PIN)) ==0) { //Key Pressed
-			key_press_handler();
-		}
+		// reg_val = PIO_REG_DATA_VALUE(PIO_B) ;
+		// if((reg_val & (1<<KEYPAD_IRQ_PIN)) ==0) { //Key Pressed
+		// 	key_press_handler();
+		// }
+			
 
-		msleep(20);
+		th_printer();
+
+		// msleep(1);
+		udelay(400);
 	}
 	set_pin_value(PIO_G,9,0);
 }
@@ -673,7 +702,11 @@ static int __init gronic_init(void) {
 	mcp23_init( CONTR_MCP );					// Drucker initialisieren
 	
 	register_lcd();
+	register_printer();
 	Init_LCD();
+
+
+	lines_to_print = 240;
 
 	task = kthread_run(&thread_function,NULL,"gronic-system");
 
@@ -683,27 +716,33 @@ static int __init gronic_init(void) {
 
 static void __exit gronic_exit(void) {
 
+	kthread_stop(task);
+
+
+
 	memset(lcd_buf,0,LCD_BUF_SIZE);
 	LCD_image((char*) lcd_buf);
 
-	/* Freeing buffer memory */
 	 if (lcd_buf) {
 	     kfree(lcd_buf);
 	 }
 	
+	 if (pr_buf) {
+		 kfree(pr_buf);
+	 }
+
 	// device_remove_file(parrot_device, &dev_attr_fifo);
 	// device_remove_file(parrot_device, &dev_attr_reset);
 	device_destroy(device_class, MKDEV(display_major, 0));
- 	input_unregister_device(keypad_dev);
 	class_unregister(device_class);								
 	class_destroy(device_class);
 	unregister_chrdev(display_major, DISPLAY_DEVICE_NAME);
 
 
+	input_unregister_device(keypad_dev);
 	
 	
 
-	kthread_stop(task);
 	// exit();
 	pr_info("Gronic system driver exit \n");
 }

@@ -183,7 +183,7 @@ typedef struct {
 #define PRINTER_STB2	0x04
 #define PRINTER_STB1	0x08
 #define PRINTER_VOLT	0x10
-#define PRINTER_MASK	(0x1F)
+#define PRINTER_MASK	(0x0F)
 
 #define PRINTER_LATCH	0x0200
 
@@ -191,9 +191,12 @@ typedef struct {
 
 #define PRINTER_OFF 0
 
-#define MAX_LINES 100
+#define MAX_LINES 99999
 
-#define PR_BUF_SIZE (PRINTER_DOT*MAX_LINES)/8								
+// #define PR_BUF_SIZE (PRINTER_DOT*MAX_LINES)/8								
+#define PR_BUF_SIZE 4096								
+
+
 
 #define CLASS_NAME "gronic"
 #define DISPLAY_DEVICE_NAME "backlcd"
