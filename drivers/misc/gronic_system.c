@@ -32,7 +32,7 @@ static int display_major;
 
 //******************Printer
 __u8 step=0;
-__u8 mcp3_A_reg=0x20;		  							
+__u8 mcp3_A_reg=0x60;		  							
 __u8 printer_status=PRINTER_START;
 __u8 printer_paper;
 __u32 lines_to_print=0;
@@ -118,12 +118,6 @@ void init_gpio(void){
 
 
 	config_pin_pull(PIO_E, 3, PULL_MODE_UP);
-
-
-
-
-
-
 	config_pin_mode(PIO_E, 10, PIN_MODE_INPUT);
 	config_pin_pull(PIO_E, 10, PULL_MODE_DOWN);
 
@@ -167,9 +161,9 @@ const ADR_REG CONTR_MCP[]={
    { GPIO_B | MCP_GPPU, 0xFF }, // GPIO-B Pull Up Res    Res DB on
    { GPIO_A | MCP_GPINTEN, 0x00 }, // GPIO-A Interrupt on changed
    { GPIO_B | MCP_GPINTEN, 0x00 }, // GPIO-B Interrupt on changed   
-   { GPIO_A | MCP_OLAT, 0x61 }, // GPIO-A default output level 
+   { GPIO_A | MCP_OLAT, 0x60  }, // GPIO-A default output level 
    { GPIO_B | MCP_OLAT, 0xFF }, // GPIO-B default output level
-	{ GPIO_A | MCP_IPOL, 0x00 },
+   { GPIO_A | MCP_IPOL, 0x00 },
    { GPIO_B | MCP_IPOL, 0x00 },
    {0xFF,0   }
 };
@@ -246,52 +240,48 @@ void mcp23_init( const ADR_REG *chip ){
 	}
 }
 
-
-
-u8 cont_reg_a = 0x60 ;		// CS= high BLT= on
-
 void disp_data(__u8 lcd_dat){
-	cont_reg_a |= 0x80;         // A0= high 
+	mcp3_A_reg |= 0x80;         // A0= high 
 	SPI_MCP(3, MCP_WRITE | (( GPIO_B | MCP_OLAT) << 8) | lcd_dat);
-	SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (cont_reg_a & ~0x20) );  // CS= low
-	SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (cont_reg_a | 0x20) );  // CS= high
+	SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (mcp3_A_reg & ~0x20) );  // CS= low
+	SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (mcp3_A_reg | 0x20) );  // CS= high
 }
 
 void disp_cmd(__u8 lcd_cmd){
-	cont_reg_a &= ~0x80;         // A0= low 
+	mcp3_A_reg &= ~0x80;         // A0= low 
 	SPI_MCP(3, MCP_WRITE | (( GPIO_B | MCP_OLAT) << 8) | lcd_cmd);
-	SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (cont_reg_a & ~0x20) );  // CS= low
-	SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (cont_reg_a | 0x20) );  // CS= high
+	SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (mcp3_A_reg & ~0x20) );  // CS= low
+	SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | (mcp3_A_reg | 0x20) );  // CS= high
 }
 
 __u8 LCD_image(char * image){
-__u8 page,i,j,v,mask_v,mask_h;
-__u8 im_buf[128];
- 
-				for(page=0; page<8; page++){
-							   memset(im_buf,0,128);
-							   mask_v=0x01;
-							   for(v=0;v<8;v++){
-											   for(j=0;j<16;j++){                                                                                                          // von horizontal pixel nach vertikal pixel wandeln
-															   mask_h=0x80;
-															   for(i=0;i<8;i++){
-																	  if(*image & mask_h) im_buf[(j*8)+i] |= mask_v;
-																			  mask_h=mask_h>>1;
-												   }
-															   image++;
-											   }
-											   mask_v = mask_v<<1;
-							   }
- 
-							   disp_cmd(START_LINE_SET);
-							   disp_cmd(PAGE_ADDRESS_SET + page);
-							   disp_cmd(COLUMN_ADDRESS_HIGH);
-							   disp_cmd(COLUMN_ADDRESS_LOW);
-							   for(i=0;i<NUMBER_OF_COLUMNS;i++){                                                // 0..127
-							   disp_data(im_buf[i]);
-							   }
+	__u8 page,i,j,v,mask_v,mask_h;
+	__u8 im_buf[128];
+
+	for(page=0; page<8; page++){
+		memset(im_buf,0,128);
+		mask_v=0x01;
+		for(v=0;v<8;v++){
+			  for(j=0;j<16;j++){                                                                                                          // von horizontal pixel nach vertikal pixel wandeln
+				mask_h=0x80;
+				for(i=0;i<8;i++){
+					if(*image & mask_h) im_buf[(j*8)+i] |= mask_v;
+					mask_h=mask_h>>1;
 				}
-				return(0);
+				image++;
+			   }
+			   mask_v = mask_v<<1;
+		}
+
+		disp_cmd(START_LINE_SET);
+		disp_cmd(PAGE_ADDRESS_SET + page);
+		disp_cmd(COLUMN_ADDRESS_HIGH);
+		disp_cmd(COLUMN_ADDRESS_LOW);
+		for(i=0;i<NUMBER_OF_COLUMNS;i++){                                                // 0..127
+			disp_data(im_buf[i]);
+		}
+	}
+	return(0);
 }
 	
 /******************************************************************************
@@ -461,7 +451,8 @@ void Init_LCD(void){
 
 
 void key_press_handler(void){
-	__u32  key,last_key = 0;
+	__u32  key;
+	static __u32 last_key = 0;
 	__u8 col_reg, row_reg;
 
 	col_reg = SPI_MCP(0, MCP_READ | (( GPIO_B | MCP_INTCAP) << 8) | 0) & 0x1F;
@@ -497,20 +488,17 @@ void key_press_handler(void){
 		case 0x177 : key = KEY_A;break;
 		case 0x1B7 :  key  = KEY_BACKSPACE ;break;
 		case 0x1D7 :  key  = KEY_ENTER;break;
-		// case 0x1FF :   key   = 0 ;break;
+		case 0x1FF :   key   = 0 ;break;
 		default : key = 0; break;
 	}
 
 	if(key){
-	LCD_image(lcd_buf);
-
+		lines_to_print = 240;
 		last_key = key;
 		input_report_key(keypad_dev, key,true);
-
 	}
 	else{
-		if(last_key)
-			input_report_key(keypad_dev,last_key,false);
+		input_report_key(keypad_dev,last_key,false);
 	}
 	input_sync(keypad_dev);
 }
@@ -583,7 +571,8 @@ __u8 hmask;
 __u8 n=PRINTER_DOT/8;
 __u8 out;
 
-	e_port = PRINTER_LATCH | step | BB_SPI2_CS0;
+	e_port = PRINTER_LATCH | step ;
+	//| BB_SPI2_CS0;
 	// e_port = (e_port & ~BB_SPI2_CS0) | PRINTER_LATCH | step;					        // Printer Latch low 
 	 *PIO_REG_DATA(PIO_E) = e_port;
 
@@ -591,7 +580,7 @@ __u8 out;
 		hmask = 0x80;
 		// *wbuf = 0x01;
 		out = *wbuf++;
-		out=0x80;
+		// out=0;
 		do{
 			if((out & hmask) == 0)
 				e_port = e_port & ~BB_SPI2_MOSI;
@@ -606,8 +595,8 @@ __u8 out;
 
 	// e_port = PRINTER_LATCH | step;
 	e_port = (e_port & ~BB_SPI2_CS0) | PRINTER_LATCH;					        // Printer Latch low
-	 *PIO_REG_DATA(PIO_E) = e_port;
-	 *PIO_REG_DATA(PIO_E) = e_port;
+	 *PIO_REG_DATA(PIO_E) = e_port | BB_SPI2_CLK ;
+	 *PIO_REG_DATA(PIO_E) = e_port | BB_SPI2_CLK;
 	 *PIO_REG_DATA(PIO_E) = e_port;
 	e_port = e_port | BB_SPI2_CS0;											// Printer Latch high
 	 *PIO_REG_DATA(PIO_E) = e_port;
@@ -674,44 +663,33 @@ void th_printer(void){				  					// Timer
 	}
 }
 
-//******** MAIN THREAD ******// 
-void thread_function(void *data){
-	__u32 reg_val;
-	printk("Gronic system  thread start\n");
-	set_pin_value(PIO_G,9,1); //Led on
-
-	wbuf = pr_buf;
-
-	while(!kthread_should_stop()){
-
-		// reg_val = PIO_REG_DATA_VALUE(PIO_B) ;
-		// if((reg_val & (1<<KEYPAD_IRQ_PIN)) ==0) { //Key Pressed
-		// 	key_press_handler();
-		// }
-			
-
-		th_printer();
-
-		// msleep(1);
-		udelay(400);
-	}
-	set_pin_value(PIO_G,9,0);
-}
-
-
 
 __u8 cnt;
-unsigned long timer_interval_ns = 1e6;
+unsigned long timer_interval_ns = 250e6;
 
 enum hrtimer_restart gronic_timer_callback( struct hrtimer *timer_for_restart )
 {
+	__u32 reg_val;
   	ktime_t currtime , interval;
-  	currtime  = ktime_get();
-  	interval = ktime_set(0,timer_interval_ns); 
-  	hrtimer_forward(timer_for_restart, currtime , interval);
 	
 	set_pin_value(PIO_G,9,(cnt++ & 1)); 
-  	// printk( "gronic_timer_callback called (%ld).\n", cnt );
+
+	reg_val = PIO_REG_DATA_VALUE(PIO_B) ;
+	if((reg_val & (1<<KEYPAD_IRQ_PIN)) ==0) { //Key Pressed
+		key_press_handler();
+	}
+	
+	th_printer();
+	if(lines_to_print > 0){
+		timer_interval_ns = 450e3;
+	}
+	else{
+		timer_interval_ns = 250e6;
+	}
+
+	currtime  = ktime_get();
+  	interval = ktime_set(0,timer_interval_ns); 
+  	hrtimer_forward(timer_for_restart, currtime , interval);
 
 	return HRTIMER_RESTART;
 }
@@ -723,6 +701,7 @@ static int __init gronic_init(void) {
 	__u32 reg_val;
 	pr_info("Gronic system driver init\n");
 	ktime_t ktime;
+ 	mcp3_A_reg = 0x60;
 
 	init_gpio();
 	init_keypad();
@@ -737,11 +716,6 @@ static int __init gronic_init(void) {
 
 	lines_to_print = 240;
 
-	// task = kthread_run(&thread_function,NULL,"gronic-system");
-
-
-
-	printk("HR Timer module installing\n");
 	ktime = ktime_set( 0, timer_interval_ns );
 	hrtimer_init( &hr_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL );
 	hr_timer.function = &gronic_timer_callback;
@@ -758,7 +732,6 @@ static void __exit gronic_exit(void) {
 
   	ret = hrtimer_cancel( &hr_timer );
   	if (ret) printk("The timer was still in use...\n");
-  	printk("HR Timer module uninstalling\n");
 	// kthread_stop(task);
 
 
