@@ -36,8 +36,9 @@ __u8 mcp3_A_reg=0x60;
 __u8 printer_status=PRINTER_START;
 __u8 printer_paper;
 __u32 lines_to_print=0;
-char * pr_image;
 char*  pr_buf;
+static int printer_major; 
+
 
 //********** General 
 struct  task_struct  *task;
@@ -336,12 +337,6 @@ int register_lcd(void){
 	}
 
 
-	device_class = class_create(THIS_MODULE, CLASS_NAME);
-	if (IS_ERR(device_class)) {
-		printk("failed to register device class '%s'\n", CLASS_NAME);
-		result = PTR_ERR(device_class);
-		goto fail;
-	}
 
 	display_device = device_create(device_class, NULL, MKDEV(display_major, 0), NULL, DISPLAY_DEVICE_NAME);
 	if (IS_ERR(display_device)) {
@@ -368,63 +363,6 @@ int register_lcd(void){
 		return result;
 }
 
-int printer_open(struct inode *inode, struct file *filp) {
-  /* Success */
-	return 0;
-}
-
-int printer_release(struct inode *inode, struct file *filp) {
-  /* Success */
-	return 0;
-}
-
-ssize_t printer_write( struct file *filp, char *buf, size_t count, loff_t *f_pos) {
-	// char *tmp;
-	// tmp=buf+count-1;
-
-	// if(count>LCD_BUF_SIZE) count = LCD_BUF_SIZE;
-	// copy_from_user(lcd_buf,buf,count);
-
-	// LCD_image(lcd_buf);
-	// return count;
-}
-
-struct file_operations pr_fops = {
-	write : printer_write,
-	open: printer_open,
-	release: printer_release
-};
-
-
-int register_printer(void){
-	int result;
-
-	 // result = register_chrdev(PR_BUF_SIZE, "thprint", &pr_fops);
-  // 		if (result < 0) {
-  //   			printk("<1>memory: cannot obtain major number %d\n", PR_BUF_SIZE);
-  //   		return result;
-  // 	}
-
-	pr_buf = kmalloc(PR_BUF_SIZE, GFP_KERNEL); 
-	if (!pr_buf) { 
-
-			result = -ENOMEM;
-			goto fail; 
-	} 
-	printk("PRBUF %d ", pr_buf);
-	memset(pr_buf,0x0,PR_BUF_SIZE);
-
-	// LCD_image((char*) pr_buf);
-
- //  	printk("Gronic registering Thermal printer : %d \n", PR_BUF_SIZE); 
-	return 0;
-
-  fail:
-		gronic_exit(); 
-		return result;
-
-}
-
 
 void Init_LCD(void){
 	disp_cmd(0);
@@ -441,13 +379,6 @@ void Init_LCD(void){
 	disp_cmd(DISPLAY_NORMAL);
 	disp_cmd(DISPLAY_ON);
 }
-
-// void Off_Display(void){
-// 	disp_cmd(0);
-// 	disp_cmd(RESET_DISPLAY);
-// 	disp_cmd(POWER_CONTROL_SET);
-// 	disp_cmd(DISPLAY_OFF);
-// }
 
 
 void key_press_handler(void){
@@ -571,16 +502,14 @@ __u8 hmask;
 __u8 n=PRINTER_DOT/8;
 __u8 out;
 
-	e_port = PRINTER_LATCH | step ;
-	//| BB_SPI2_CS0;
-	// e_port = (e_port & ~BB_SPI2_CS0) | PRINTER_LATCH | step;					        // Printer Latch low 
+	e_port = PRINTER_LATCH | step | BB_SPI2_CS0;
 	 *PIO_REG_DATA(PIO_E) = e_port;
 
 	while(n--){
 		hmask = 0x80;
 		// *wbuf = 0x01;
 		out = *wbuf++;
-		// out=0;
+		// out=0x01;
 		do{
 			if((out & hmask) == 0)
 				e_port = e_port & ~BB_SPI2_MOSI;
@@ -589,22 +518,23 @@ __u8 out;
 			*PIO_REG_DATA(PIO_E) = e_port;
 			*PIO_REG_DATA(PIO_E) = e_port | BB_SPI2_CLK ;
 			hmask = hmask >> 1;
-		//	set_port( PORT_E, e_port);										// clk low
+	 		*PIO_REG_DATA(PIO_E) = e_port ;
 		}while(hmask);
 	}
 
 	// e_port = PRINTER_LATCH | step;
+	 *PIO_REG_DATA(PIO_E) = e_port ;
+
 	e_port = (e_port & ~BB_SPI2_CS0) | PRINTER_LATCH;					        // Printer Latch low
-	 *PIO_REG_DATA(PIO_E) = e_port | BB_SPI2_CLK ;
-	 *PIO_REG_DATA(PIO_E) = e_port | BB_SPI2_CLK;
-	 *PIO_REG_DATA(PIO_E) = e_port;
+	 *PIO_REG_DATA(PIO_E) = e_port ;
+	 *PIO_REG_DATA(PIO_E) = e_port ;
 	e_port = e_port | BB_SPI2_CS0;											// Printer Latch high
 	 *PIO_REG_DATA(PIO_E) = e_port;
 }
 
 
 
-void th_printer(void){				  					// Timer 
+__u8 th_printer(void){				  					// Timer 
 
 	if(lines_to_print==0){
 		if(printer_status){
@@ -614,7 +544,7 @@ void th_printer(void){				  					// Timer
 			e_port &= 0x0F;		
 			 *PIO_REG_DATA(PIO_E) = e_port;
 		}
-		return;
+		return 0;
 	}
 
 
@@ -623,6 +553,7 @@ void th_printer(void){				  					// Timer
 	switch(printer_status){
 
 		case PRINTER_START:
+			wbuf = pr_buf;
 			mcp3_A_reg = mcp3_A_reg | PRINTER_VOLT | PRINTER_WDT;
 			SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | mcp3_A_reg );	// Printer on
 			mcp3_A_reg = mcp3_A_reg & ~PRINTER_WDT;
@@ -640,8 +571,6 @@ void th_printer(void){				  					// Timer
 
 		case HEAD_LOAD_1PRT:
 			head_out();
-			pr_image = pr_image + (PRINTER_DOT/8);
-
 			mcp3_A_reg = ( mcp3_A_reg | PRINTER_VOLT | PRINTER_WDT | PRINTER_STB1 ) & ~( PRINTER_STB2 ) ;
 			printer_paper=SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | mcp3_A_reg );	// Printer Sensor
 
@@ -661,6 +590,68 @@ void th_printer(void){				  					// Timer
 		break;
 
 	}
+	return 1;
+}
+
+
+int printer_open(struct inode *inode, struct file *filp) {
+  /* Success */
+	return 0;
+}
+
+int printer_release(struct inode *inode, struct file *filp) {
+  /* Success */
+	return 0;
+}
+
+ssize_t printer_write( struct file *filp, char *buf, size_t count, loff_t *f_pos) {
+
+
+	char *tmp;
+	tmp=buf+count-1;
+
+	copy_from_user(pr_buf,buf,PR_BUF_SIZE);
+
+	lines_to_print = (count * 8) /PRINTER_DOT;
+	printk("%d lines to print\n",lines_to_print) ;
+	return count;
+}
+
+struct file_operations pr_fops = {
+	write : printer_write,
+	open: printer_open,
+	release: printer_release
+};
+
+int register_printer(void){
+	int result;
+
+	 printer_major = register_chrdev(0, PRINTER_DEVICE_NAME, &pr_fops);
+		if (result < 0) {
+			printk("memory: cannot obtain major number %d\n", printer_major);
+			return result;
+	}
+
+	display_device = device_create(device_class, NULL, MKDEV(printer_major, 0), NULL, PRINTER_DEVICE_NAME);
+	if (IS_ERR(display_device)) {
+		printk("failed to create device '%s_%s'\n", CLASS_NAME, PRINTER_DEVICE_NAME);
+		result = PTR_ERR(display_device);
+		goto fail;
+	}
+
+
+	pr_buf = kmalloc(PR_BUF_SIZE, GFP_KERNEL); 
+	if (!pr_buf) { 
+		result = -ENOMEM;
+		goto fail; 
+	} 
+
+	printk("Gronic registering Printer : %d \n", printer_major); 
+	return 0;
+
+  fail:
+	gronic_exit(); 
+	return result;
 }
 
 
@@ -679,8 +670,8 @@ enum hrtimer_restart gronic_timer_callback( struct hrtimer *timer_for_restart )
 		key_press_handler();
 	}
 	
-	th_printer();
-	if(lines_to_print > 0){
+	
+	if(th_printer() > 0){
 		timer_interval_ns = 450e3;
 	}
 	else{
@@ -697,32 +688,42 @@ enum hrtimer_restart gronic_timer_callback( struct hrtimer *timer_for_restart )
 
 
 static int __init gronic_init(void) {
-	int data = 20;
-	__u32 reg_val;
-	pr_info("Gronic system driver init\n");
 	ktime_t ktime;
- 	mcp3_A_reg = 0x60;
+
+	pr_info("Gronic system driver init\n");
 
 	init_gpio();
 	init_keypad();
+ 	mcp3_A_reg = 0x60;
 
 	mcp23_init( KEYB_MCP );						// Tastatur initialisieren
 	mcp23_init( CONTR_MCP );					// Drucker initialisieren
 	
+
+
+	device_class = class_create(THIS_MODULE, CLASS_NAME);
+	if (IS_ERR(device_class)) {
+		printk("failed to register device class '%s'\n", CLASS_NAME);
+		goto fail;
+	}
+
 	register_lcd();
 	register_printer();
 	Init_LCD();
 
 
-	lines_to_print = 240;
+	// lines_to_print = 240;
 
 	ktime = ktime_set( 0, timer_interval_ns );
 	hrtimer_init( &hr_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL );
 	hr_timer.function = &gronic_timer_callback;
-	printk( "Starting timer to fire in %ldms (%ld)\n", timer_interval_ns, jiffies );
  	hrtimer_start( &hr_timer, ktime, HRTIMER_MODE_REL );
 
 	return 0;
+
+fail : 
+	printk("Fail registering device class");
+	return 1; 
 }
 
 
@@ -730,34 +731,41 @@ static void __exit gronic_exit(void) {
 
 	int ret;
 
+	//Stop timer
   	ret = hrtimer_cancel( &hr_timer );
-  	if (ret) printk("The timer was still in use...\n");
-	// kthread_stop(task);
+  	if (ret){
+  		udelay(50);
+  		printk("The timer was still in use...\n");
+  	}
+  		
+  	//Remove LCD 
 
-
+  	// device_remove_file(parrot_device, &dev_attr_fifo);
+	// device_remove_file(parrot_device, &dev_attr_reset);
+	device_destroy(device_class, MKDEV(display_major, 0));
+	unregister_chrdev(display_major, DISPLAY_DEVICE_NAME);
 
 	memset(lcd_buf,0,LCD_BUF_SIZE);
 	LCD_image((char*) lcd_buf);
 
 	 if (lcd_buf) {
-	     kfree(lcd_buf);
+	     	kfree(lcd_buf);
 	 }
 	
+	//Remove Printer
+
+	device_destroy(device_class, MKDEV(printer_major, 0));
+	unregister_chrdev(printer_major, DISPLAY_DEVICE_NAME);
+
 	 if (pr_buf) {
-		 kfree(pr_buf);
+		kfree(pr_buf);
 	 }
 
-	// device_remove_file(parrot_device, &dev_attr_fifo);
-	// device_remove_file(parrot_device, &dev_attr_reset);
-	device_destroy(device_class, MKDEV(display_major, 0));
 	class_unregister(device_class);								
-	class_destroy(device_class);
-	unregister_chrdev(display_major, DISPLAY_DEVICE_NAME);
+	class_destroy(device_class);	
 
-
+	//Remove Keypad
 	input_unregister_device(keypad_dev);
-	
-	
 
 	// exit();
 	pr_info("Gronic system driver exit \n");
