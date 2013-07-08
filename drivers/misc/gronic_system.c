@@ -9,9 +9,13 @@
 #include <mach/platform.h>
 #include <linux/delay.h>
 #include <linux/input.h>
+#include <linux/hrtimer.h>
+#include <linux/ktime.h>
+
 #include "gronic_system.h"
 
 
+#define MS_TO_NS(x)	(x * 1E6L)
 
 //*********** SPI 
 __u32 e_port;
@@ -38,6 +42,12 @@ char*  pr_buf;
 //********** General 
 struct  task_struct  *task;
 static struct class* device_class = NULL;
+
+
+
+static struct hrtimer hr_timer;
+
+
 
 MODULE_AUTHOR("Gronic Systems GmbH");
 MODULE_LICENSE("GPL");
@@ -690,10 +700,29 @@ void thread_function(void *data){
 
 
 
+__u8 cnt;
+unsigned long timer_interval_ns = 1e6;
+
+enum hrtimer_restart gronic_timer_callback( struct hrtimer *timer_for_restart )
+{
+  	ktime_t currtime , interval;
+  	currtime  = ktime_get();
+  	interval = ktime_set(0,timer_interval_ns); 
+  	hrtimer_forward(timer_for_restart, currtime , interval);
+	
+	set_pin_value(PIO_G,9,(cnt++ & 1)); 
+  	// printk( "gronic_timer_callback called (%ld).\n", cnt );
+
+	return HRTIMER_RESTART;
+}
+
+
+
 static int __init gronic_init(void) {
 	int data = 20;
 	__u32 reg_val;
 	pr_info("Gronic system driver init\n");
+	ktime_t ktime;
 
 	init_gpio();
 	init_keypad();
@@ -708,7 +737,16 @@ static int __init gronic_init(void) {
 
 	lines_to_print = 240;
 
-	task = kthread_run(&thread_function,NULL,"gronic-system");
+	// task = kthread_run(&thread_function,NULL,"gronic-system");
+
+
+
+	printk("HR Timer module installing\n");
+	ktime = ktime_set( 0, timer_interval_ns );
+	hrtimer_init( &hr_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL );
+	hr_timer.function = &gronic_timer_callback;
+	printk( "Starting timer to fire in %ldms (%ld)\n", timer_interval_ns, jiffies );
+ 	hrtimer_start( &hr_timer, ktime, HRTIMER_MODE_REL );
 
 	return 0;
 }
@@ -716,7 +754,12 @@ static int __init gronic_init(void) {
 
 static void __exit gronic_exit(void) {
 
-	kthread_stop(task);
+	int ret;
+
+  	ret = hrtimer_cancel( &hr_timer );
+  	if (ret) printk("The timer was still in use...\n");
+  	printk("HR Timer module uninstalling\n");
+	// kthread_stop(task);
 
 
 
