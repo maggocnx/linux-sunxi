@@ -11,6 +11,7 @@
 #include <linux/input.h>
 #include <linux/hrtimer.h>
 #include <linux/ktime.h>
+#include <linux/kfifo.h>
 
 #include "gronic_system.h"
 
@@ -24,7 +25,6 @@ __u32 e_port;
 // struct gronic_keypad_data *key_data = NULL;
 static struct input_dev *keypad_dev;
 
-
 //*************LCD
 char*  lcd_buf;
 static struct device* display_device = NULL;
@@ -36,19 +36,15 @@ __u8 mcp3_A_reg=0x60;
 __u8 printer_status=PRINTER_START;
 __u8 printer_paper;
 __u32 lines_to_print=0;
-char*  pr_buf;
 static int printer_major; 
+
+static DECLARE_KFIFO(printer_fifo, char,PR_BUF_SIZE);
 
 
 //********** General 
 struct  task_struct  *task;
 static struct class* device_class = NULL;
-
-
-
 static struct hrtimer hr_timer;
-
-
 
 MODULE_AUTHOR("Gronic Systems GmbH");
 MODULE_LICENSE("GPL");
@@ -169,45 +165,12 @@ const ADR_REG CONTR_MCP[]={
    {0xFF,0   }
 };
 
-// void spi_mcp23_config( void){
-// 	*SPI_A13_REG(SPI_CTL) 	= 0x000A0013;		// DEL,PHA,MODE,ENABLE
-// 	*SPI_A13_REG(SPI_WAIT)	= 0x00000080;		// WAIT Timer
-// 	*SPI_A13_REG(SPI_CCTL)	= 0x00000010;		// Clock Freq.
-// }
-
 void spi_thermal_config( void){
 
 	*SPI_A13_REG(SPI_CTL)	= 0x000A0013;		// DEL,PHA,MODE,ENABLE
 	*SPI_A13_REG(SPI_WAIT)	= 0x00000080;		// WAIT Timer
 	*SPI_A13_REG(SPI_CCTL)	= 0x00000010;		// Clock Freq.
 }
-
-
-// static void spi_cs_set( u8 select){
-// 	switch(select){
-// 		case 0:						// MCP23S17  ext. GPIO
-// 			set_pin_value(PIO_E, SPI_SEL_0, 0);
-// 			set_pin_value(PIO_E, SPI_SEL_1, 0);
-// 		break;
-		
-// 		case 1:						// MCP23S17  Thermal Printer Control
-// 			set_pin_value(PIO_E, SPI_SEL_0, 0);
-// 			set_pin_value(PIO_E, SPI_SEL_1, 1);
-// 		break;
-
-// 		case 2:						// MCP23S17  Front-LCD
-// 			set_pin_value(PIO_E, SPI_SEL_0, 1);
-// 			set_pin_value(PIO_E, SPI_SEL_1, 0);
-// 		break;
-
-// 		case 3:						// Thermal Printer Head
-// 			set_pin_value(PIO_E, SPI_SEL_0, 1);
-// 			set_pin_value(PIO_E, SPI_SEL_1, 1);
-// 		break;
-		
-// 	}
-// }
-
 
 u32 SPI_MCP(__u8 mcp_chip, __u32 sdata){
 
@@ -495,21 +458,30 @@ void step_out(void){	   								// stepper -1
 	 *PIO_REG_DATA(PIO_E) = (e_port & 0xF) | step;
 }
 
-char *wbuf;
 
 void head_out(void){					   			// Thermal Head out
 __u8 hmask;
 __u8 n=PRINTER_DOT/8;
 __u8 out;
 
+__u8 line_buf[n];
+__u8 *out_ptr = &line_buf; 
+
+
+	if(kfifo_peek_len(&printer_fifo) > n)
+		kfifo_out(&printer_fifo,line_buf,n);
+	else{
+		kfifo_reset(&printer_fifo);
+		return;
+	}
+
+
 	e_port = PRINTER_LATCH | step | BB_SPI2_CS0;
 	 *PIO_REG_DATA(PIO_E) = e_port;
 
 	while(n--){
 		hmask = 0x80;
-		// *wbuf = 0x01;
-		out = *wbuf++;
-		// out=0x01;
+		out = *out_ptr++;
 		do{
 			if((out & hmask) == 0)
 				e_port = e_port & ~BB_SPI2_MOSI;
@@ -522,9 +494,7 @@ __u8 out;
 		}while(hmask);
 	}
 
-	// e_port = PRINTER_LATCH | step;
 	 *PIO_REG_DATA(PIO_E) = e_port ;
-
 	e_port = (e_port & ~BB_SPI2_CS0) | PRINTER_LATCH;					        // Printer Latch low
 	 *PIO_REG_DATA(PIO_E) = e_port ;
 	 *PIO_REG_DATA(PIO_E) = e_port ;
@@ -547,13 +517,9 @@ __u8 th_printer(void){				  					// Timer
 		return 0;
 	}
 
-
-	// printk("lines : %d -- step : %x -- status : %d\n", lines_to_print, step,printer_status);
-
 	switch(printer_status){
 
 		case PRINTER_START:
-			wbuf = pr_buf;
 			mcp3_A_reg = mcp3_A_reg | PRINTER_VOLT | PRINTER_WDT;
 			SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | mcp3_A_reg );	// Printer on
 			mcp3_A_reg = mcp3_A_reg & ~PRINTER_WDT;
@@ -580,6 +546,8 @@ __u8 th_printer(void){				  					// Timer
 		case HEAD_2PRT:
 			mcp3_A_reg = ( mcp3_A_reg | PRINTER_VOLT  | PRINTER_STB2 ) & ~PRINTER_STB1;
 			printer_paper=SPI_MCP(3, MCP_WRITE | (( GPIO_A | MCP_OLAT) << 8) | mcp3_A_reg );	// Printer Sensor
+			step_out();
+
 			printer_status--;
 		break;
 
@@ -605,16 +573,19 @@ int printer_release(struct inode *inode, struct file *filp) {
 }
 
 ssize_t printer_write( struct file *filp, char *buf, size_t count, loff_t *f_pos) {
+	__u32 bytes_to_read;
+	__u32 copied;
 
+	if(count>PR_IN_SIZE)
+		bytes_to_read = PR_IN_SIZE;
+	else 
+		bytes_to_read = count;
 
-	char *tmp;
-	tmp=buf+count-1;
+	copied = kfifo_in(&printer_fifo, buf,bytes_to_read);
 
-	copy_from_user(pr_buf,buf,PR_BUF_SIZE);
-
-	lines_to_print = (count * 8) /PRINTER_DOT;
-	printk("%d lines to print\n",lines_to_print) ;
-	return count;
+	lines_to_print += (copied * 8) /PRINTER_DOT;
+	printk("%d lines to print xount : %d \n",lines_to_print,count) ;
+	return copied;
 }
 
 struct file_operations pr_fops = {
@@ -625,6 +596,9 @@ struct file_operations pr_fops = {
 
 int register_printer(void){
 	int result;
+
+	 INIT_KFIFO(printer_fifo);
+
 
 	 printer_major = register_chrdev(0, PRINTER_DEVICE_NAME, &pr_fops);
 		if (result < 0) {
@@ -638,13 +612,6 @@ int register_printer(void){
 		result = PTR_ERR(display_device);
 		goto fail;
 	}
-
-
-	pr_buf = kmalloc(PR_BUF_SIZE, GFP_KERNEL); 
-	if (!pr_buf) { 
-		result = -ENOMEM;
-		goto fail; 
-	} 
 
 	printk("Gronic registering Printer : %d \n", printer_major); 
 	return 0;
@@ -711,9 +678,6 @@ static int __init gronic_init(void) {
 	register_printer();
 	Init_LCD();
 
-
-	// lines_to_print = 240;
-
 	ktime = ktime_set( 0, timer_interval_ns );
 	hrtimer_init( &hr_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL );
 	hr_timer.function = &gronic_timer_callback;
@@ -756,10 +720,6 @@ static void __exit gronic_exit(void) {
 
 	device_destroy(device_class, MKDEV(printer_major, 0));
 	unregister_chrdev(printer_major, DISPLAY_DEVICE_NAME);
-
-	 if (pr_buf) {
-		kfree(pr_buf);
-	 }
 
 	class_unregister(device_class);								
 	class_destroy(device_class);	

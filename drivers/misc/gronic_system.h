@@ -173,8 +173,9 @@ typedef struct {
 
 
 #define PRINTER_START	0
-#define HEAD_LOAD_1PRT	3
-#define	HEAD_2PRT		2
+#define HEAD_LOAD_1PRT	5
+
+#define	HEAD_2PRT		3
 #define NEXT_STEP		1
 
 
@@ -194,8 +195,8 @@ typedef struct {
 #define MAX_LINES 99999
 
 // #define PR_BUF_SIZE (PRINTER_DOT*MAX_LINES)/8								
-#define PR_BUF_SIZE 4096								
-
+#define PR_BUF_SIZE 1048576								
+#define PR_IN_SIZE  3840
 
 
 #define CLASS_NAME "gronic"
