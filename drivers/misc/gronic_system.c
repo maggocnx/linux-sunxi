@@ -12,7 +12,6 @@
 #include <linux/hrtimer.h>
 #include <linux/ktime.h>
 #include <linux/kfifo.h>
-
 #include "gronic_system.h"
 
 
@@ -37,6 +36,9 @@ __u8 printer_status=PRINTER_START;
 __u8 printer_paper;
 __u32 lines_to_print=0;
 static int printer_major; 
+
+static struct device* printer_device = NULL;
+
 
 static DECLARE_KFIFO(printer_fifo, char,PR_BUF_SIZE);
 
@@ -387,7 +389,6 @@ void key_press_handler(void){
 	}
 
 	if(key){
-		lines_to_print = 240;
 		last_key = key;
 		input_report_key(keypad_dev, key,true);
 	}
@@ -594,6 +595,21 @@ struct file_operations pr_fops = {
 	release: printer_release
 };
 
+
+static ssize_t sys_contrast(struct device* dev, struct device_attribute* attr, const char* buf, size_t count)
+	{
+	 __u8 result;
+	 char *end;
+
+	 result = simple_strtoul(buf,end,10);
+	 printk("set contrast : %d\n", result );
+	 
+	 return count;
+}
+
+
+static DEVICE_ATTR(contrast, S_IWUSR, NULL, sys_contrast);
+
 int register_printer(void){
 	int result;
 
@@ -606,12 +622,19 @@ int register_printer(void){
 			return result;
 	}
 
-	display_device = device_create(device_class, NULL, MKDEV(printer_major, 0), NULL, PRINTER_DEVICE_NAME);
-	if (IS_ERR(display_device)) {
+	printer_device = device_create(device_class, NULL, MKDEV(printer_major, 0), NULL, PRINTER_DEVICE_NAME);
+	if (IS_ERR(printer_device)) {
 		printk("failed to create device '%s_%s'\n", CLASS_NAME, PRINTER_DEVICE_NAME);
-		result = PTR_ERR(display_device);
+		result = PTR_ERR(printer_device);
 		goto fail;
 	}
+
+
+ 	result = device_create_file(printer_device, &dev_attr_contrast);
+	 if (result < 0) {
+		printk("failed to create reset /sys endpoint - continuing without\n");
+	 }
+
 
 	printk("Gronic registering Printer : %d \n", printer_major); 
 	return 0;
@@ -630,7 +653,7 @@ enum hrtimer_restart gronic_timer_callback( struct hrtimer *timer_for_restart )
 	__u32 reg_val;
   	ktime_t currtime , interval;
 	
-	set_pin_value(PIO_G,9,(cnt++ & 1)); 
+	// set_pin_value(PIO_G,9,(cnt++ & 1)); 
 
 	reg_val = PIO_REG_DATA_VALUE(PIO_B) ;
 	if((reg_val & (1<<KEYPAD_IRQ_PIN)) ==0) { //Key Pressed
@@ -656,6 +679,10 @@ enum hrtimer_restart gronic_timer_callback( struct hrtimer *timer_for_restart )
 
 static int __init gronic_init(void) {
 	ktime_t ktime;
+
+
+	set_pin_value(PIO_G,9,1); 
+
 
 	pr_info("Gronic system driver init\n");
 
@@ -691,7 +718,7 @@ fail :
 }
 
 
-static void __exit gronic_exit(void) {
+static void  __exit gronic_exit(void) {
 
 	int ret;
 
@@ -727,7 +754,8 @@ static void __exit gronic_exit(void) {
 	//Remove Keypad
 	input_unregister_device(keypad_dev);
 
-	// exit();
+	set_pin_value(PIO_G,9,0); 
+
 	pr_info("Gronic system driver exit \n");
 }
 
